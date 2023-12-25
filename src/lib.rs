@@ -4,41 +4,39 @@ use std::sync::{
     Arc,
     Mutex,
 };
+use walkdir::{DirEntry, WalkDir};
 
-const DELIMITER_UNIT: &str = "——";
+const DELIMITER_UNIT: &str = "|_";
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct Tree {
-    root: Arc<Mutex<Node>>,
+    root: Option<Arc<Mutex<Node>>>,
     len: usize,
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 struct Node {
-    data: Entry,
-    children: Vec<Arc<Mutex<Node>>>,
+    data: DirEntry,
+    // 前缀
+    prefix: String,
+    children: Vec<Option<Arc<Mutex<Node>>>>,
     // 结束
     end: bool,
 }
 
-#[derive(Default, Debug)]
-struct Entry {
-    name: String,
-}
 
 impl Node {
-    fn new(name: &String, end: bool) -> Self {
+    fn new(entry: &DirEntry) -> Self {
         Node {
-            data: Entry {
-                name: name.clone(),
-            },
+            data: entry.clone(),
+            prefix: "".to_string(),
             children: Vec::new(),
-            end: end,
+            end: false,
         }
     }
 
-    fn push(&mut self, node: Arc<Mutex<Node>>) {
-        self.children.push(node)
+    fn push(&mut self, node: Option<Arc<Mutex<Node>>>) {
+        self.children.push(node);
     }
 
     fn set_end(&mut self, end: bool) {
@@ -48,14 +46,23 @@ impl Node {
 
 impl Tree {
     pub fn new() -> Self {
-        Tree::default()
+        // 随便创建一个root, 总之不用
+        let walk_dir = WalkDir::new("/").max_depth(1);
+        let Some(Ok(entry)) = walk_dir.into_iter().next() else { todo!() };
+
+        Tree {
+            root: Some(Arc::new(Mutex::new(
+                Node::new(&entry),
+            ))),
+            len: 0,
+        }
     }
 
     // insert
-    // @param path &String eg-"/root/ect/b.txt"
-    pub fn insert(&mut self, path: &String) {
+    pub fn insert(&mut self, entry: DirEntry) {
         // 解析文件路径
-        let paths = self._parse_path(path);
+        let paths = self._parse_path(entry.clone());
+
         if paths.len() == 0 {
             return ;
         }
@@ -63,56 +70,62 @@ impl Tree {
         let mut root = self.root.clone();
         let mut flag = false;
 
-        for (idx, path) in paths.iter().enumerate() {
-            flag = false;
-
-            let children = root.lock().unwrap().
-                children.
-                clone();
-
-            for node in children.iter() {
-                let name = &node.
-                    lock().
-                    unwrap().
-                    data.
-                    name;
-
-                if name == &path.to_string() {
-                    root = node.clone();
-                    flag = true;
+        for (i, path) in paths.iter().enumerate() {
+            match root {
+                None => {
                     break;
-                }
-            }
+                },
+                Some(_) => {
+                    flag = false;
 
-            // 判断是否循环到名字
-            let mut end = false;
-            if idx == paths.len() - 1 {
-                end = true;
-            }
+                    for node in root.clone().unwrap().lock().unwrap().
+                        children.
+                        iter()
+                    {
+                        if node.clone().unwrap().lock().unwrap().data.file_name().to_str()
+                            ==
+                            Some(&path.to_string())
+                        {
+                            root = node.clone();
+                            flag = true;
+                            break;
+                        }
+                    }
 
-            if !flag {
-                let node = Arc::new(
-                    Mutex::new(Node::new(&path.to_string(), end))
-                );
+                    let mut end = false;
+                    if i == paths.len() - 1{
+                        end = true;
+                    }
 
-                root.lock().unwrap().
-                    push(node.clone());
-                self.len += 1;
+                    if !flag {
+                        let node = Some(Arc::new(
+                            Mutex::new(Node::new(&entry))
+                        ));
 
-                root = node.clone();
-            } else {
-                root.lock().unwrap().
-                    set_end(end);
+                        node.clone().unwrap().lock().unwrap().set_end(end);
+
+                        root.unwrap().lock().unwrap().
+                            push(node.clone());
+                        self.len += 1;
+
+                        root = node.clone();
+                    } else {
+                        root.clone().unwrap().lock().unwrap().
+                            set_end(end);
+                    }
+                },
             }
         }
     }
 
-    fn _parse_path(&self, path: &String) -> Vec<String> {
-        if *path == "" {
+    fn _parse_path(&self, entry: DirEntry) -> Vec<String> {
+        let paths_entry = entry.path().to_str().unwrap();
+
+        if paths_entry == "" {
             return Vec::new();
         }
 
-        let paths_split = path.split("/").
+        let paths_split = paths_entry.split("/").
             filter(|&s| -> bool {
                 s != ""
             });
@@ -125,47 +138,64 @@ impl Tree {
         paths
     }
 
-    // 遍历
-    fn dfs(&self) -> Vec<String> {
-        let mut names = Vec::new();
+    // dfs
+    fn dfs(&self) -> Vec<Arc<Mutex<Node>>> {
+        let mut nodes = Vec::new();
 
-        // 递归遍历树
-        let children = self.root.lock().unwrap().
-            children.
-            clone();
+        self._dfs(
+            self.root.clone().unwrap().lock().unwrap().
+                children.clone(),
+            &mut nodes, &"".to_string(),
+        );
 
-        self._dfs(children, &mut names, &DELIMITER_UNIT.to_string());
-
-        names
+        nodes
     }
 
-    fn _dfs(&self, children: Vec<Arc<Mutex<Node>>>, names: &mut Vec<String>, prefix: &String) {
+    fn _dfs(&self, children: Vec<Option<Arc<Mutex<Node>>>>, nodes: &mut Vec<Arc<Mutex<Node>>>, prefix: &String) {
         // 若遍历结束，那么直接结束
         if children.len() == 0 {
             return ;
         }
 
         for node in children.iter() {
-            let node = node.lock().unwrap();
+            if let Some(node) = node {
 
-            names.push(format!("{}{}", prefix, node.data.name));
+                node.lock().unwrap().prefix = (*prefix).clone();
+                nodes.push(node.clone());
 
-            self._dfs(
-                node.children.clone(),
-                names,
-                &format!("{}{}", DELIMITER_UNIT, prefix),
-            );
+                self._dfs(
+                    node.lock().unwrap().children.clone(),
+                    nodes,
+                    &format!("{}{}", DELIMITER_UNIT, prefix),
+                );
+            }
         }
     }
 
     pub fn printer(&self) {
-        let names = self.dfs();
+        // 根据参数打印不同信息
 
-        for name in names.iter() {
-            println!("|{}", name);
+        let nodes = self.dfs();
+
+        for node in nodes.iter() {
+            let node = node.lock().unwrap();
+
+            let mut line = format!("{}", node.prefix);
+
+            // 追加文件名
+            if let Some(name) = node.data.file_name().to_str() {
+                line = format!("{} {:}", line, name);
+            }
+
+            if node.data.file_type().is_dir() {
+                line = format!("{} {}", line, "dir")
+            }
+
+            // 打印行
+            println!("{}", line);
         }
     }
-    // len
+
     pub fn len(&self) -> usize {
         self.len
     }
@@ -173,19 +203,15 @@ impl Tree {
 
 #[test]
 fn tree_test() {
-    let mut tree = Tree::new();
-    tree.insert(&"/root/ect/a.txt".to_string());
-    tree.insert(&"/root/ect/b.txt".to_string());
-    tree.insert(&"/root/ect/c.txt".to_string());
+    let mut file_tree = Tree::new();
+    let walk_dir = WalkDir::new("/var");
 
-    tree.insert(&"/users/ect/a.txt".to_string());
-    tree.insert(&"/users/ect/b.txt".to_string());
-    tree.insert(&"/users/ect/c.txt".to_string());
+    for entry in walk_dir {
+        if let Ok(entry) = entry {
+            file_tree.insert(entry);
+        }
+    }
 
-    tree.printer();
-
-    // println!("{:#?}", tree);
-    // println!("iter: {:#?}, len: {:?}", tree.dfs(), tree.len());
+    file_tree.printer();
+    println!("tree_len: {}", file_tree.len);
 }
-
-
