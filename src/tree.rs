@@ -1,7 +1,8 @@
+use std::fmt::{Debug, format};
 use std::sync::{Arc, Mutex};
 use walkdir::{DirEntry, WalkDir};
 
-const DELIMITER_UNIT: &str = "|——";
+const  DELIMITER_UNIT: &str = "|——";
 
 #[derive(Debug)]
 pub struct Tree {
@@ -18,10 +19,10 @@ struct Node {
 }
 
 impl Node {
-    fn new(entry: &DirEntry) -> Self {
+    fn new(entry: &DirEntry, prefix: &String) -> Self {
         Node {
             data: entry.clone(),
-            prefix: "".to_string(),
+            prefix: prefix.clone(),
             children: Vec::new(),
         }
     }
@@ -30,7 +31,7 @@ impl Node {
         self.children.push(node);
     }
 
-    fn set_prefix(&mut self, prefix: String) -> &mut Self {
+    fn set_prefix(&mut self, prefix: &String) -> &mut Self {
         self.prefix = prefix.clone();
         self
     }
@@ -38,32 +39,37 @@ impl Node {
 
 impl Tree {
     pub fn new() -> Self {
-        // 随便创建一个root, 总之不用
-        let walk_dir = WalkDir::new("/").max_depth(1);
-        let Some(Ok(entry)) = walk_dir.into_iter().next() else { todo!() };
+        // let walk_dir = WalkDir::new(path.unwrap()).max_depth(1);
+        // let Some(Ok(entry)) = walk_dir.into_iter().next() else { todo!() };
 
         Tree {
-            root: Some(Arc::new(Mutex::new(
-                Node::new(&entry),
-            ))),
+            root: None,
             len: 0,
         }
     }
 
+    pub fn insert_root(&mut self, entry: DirEntry) -> &mut Self {
+        self.root = Some(Arc::new(Mutex::new(Node::new(&entry, &String::new()))));
+        self
+    }
+
     // insert
-    pub fn insert(&mut self, entry: DirEntry) {
+    pub fn insert(&mut self, entry: DirEntry) -> &mut Self {
         // 解析文件路径
         let paths = self._parse_path(entry.clone());
 
         if paths.len() == 0 {
-            return ;
+            return self;
         }
 
         let mut root = self.root.clone();
+        let mut prefix: String = String::new();
         let mut flag = false;
 
         for path in paths.iter() {
-            if let None = root { return ; }
+            if let None = root { return self; }
+
+            prefix.push_str(DELIMITER_UNIT);
 
             flag = false;
             for node in root.clone().unwrap().lock().unwrap().
@@ -82,7 +88,7 @@ impl Tree {
 
             if !flag {
                 let node = Some(Arc::new(
-                    Mutex::new(Node::new(&entry)),
+                    Mutex::new(Node::new(&entry, &prefix.to_string())),
                 ));
 
                 root.unwrap().lock().unwrap().
@@ -92,14 +98,20 @@ impl Tree {
                 root = node.clone();
             }
         }
+        self
     }
 
     fn _parse_path(&self, entry: DirEntry) -> Vec<String> {
-        let paths_entry = entry.path().to_str().unwrap();
+        let mut paths_entry = entry.path().to_str().unwrap();
 
         if paths_entry == "" {
             return Vec::new();
         }
+
+        // 将根节点切出
+        let root_len = self.root.clone().unwrap().
+            lock().unwrap().data.path().to_str().unwrap().len();
+        paths_entry = &paths_entry[root_len..];
 
         let paths_split = paths_entry.split("/").
             filter(|&s| -> bool {
@@ -121,13 +133,13 @@ impl Tree {
         self._dfs(
             self.root.clone().unwrap().lock().unwrap().
                 children.clone(),
-            &mut nodes, &"".to_string(),
+            &mut nodes,
         );
 
         nodes
     }
 
-    fn _dfs(&self, children: Vec<Option<Arc<Mutex<Node>>>>, nodes: &mut Vec<Arc<Mutex<Node>>>, prefix: &String) {
+    fn _dfs(&self, children: Vec<Option<Arc<Mutex<Node>>>>, nodes: &mut Vec<Arc<Mutex<Node>>>) {
         // 若遍历结束，那么直接结束
         if children.len() == 0 {
             return ;
@@ -135,14 +147,11 @@ impl Tree {
 
         for node in children.iter() {
             if let Some(node) = node {
-
-                node.lock().unwrap().set_prefix((*prefix).clone());
                 nodes.push(node.clone());
 
                 self._dfs(
                     node.lock().unwrap().children.clone(),
                     nodes,
-                    &format!("{}{}", DELIMITER_UNIT, prefix),
                 );
             }
         }
@@ -151,18 +160,31 @@ impl Tree {
     pub fn printer(&self) {
         let nodes = self.dfs();
 
-        for node in nodes.iter() {
-            let node = node.lock().unwrap();
-
-            let mut line = format!("{}", node.prefix);
-
-            if let Some(name) = node.data.file_name().to_str() {
-                line = format!("{}{}", line, name);
-            }
-
-            // print
-            println!("{}", line);
+        // 打印根节点
+        if let Some(root) = &self.root {
+            self._print_line(true, root);
         }
+
+        // 打印子节点
+        for node in nodes.iter() {
+            self._print_line(false, node);
+        }
+    }
+
+    // print line
+    fn _print_line(&self, root: bool, node: &Arc<Mutex<Node>>) {
+        let node = node.lock().unwrap();
+
+        let mut line = format!("{}", node.prefix);
+
+        if root {
+            line = format!("{}{}", line, node.data.path().to_str().unwrap())
+        } else {
+            line = format!("{}{}", line, node.data.file_name().to_str().unwrap())
+        }
+
+        // print
+        println!("{}", line);
     }
 
     pub fn len(&self) -> usize {
@@ -178,9 +200,15 @@ impl Tree {
 #[test]
 fn tree_test() {
     let mut file_tree = Tree::new();
-    let walk_dir = WalkDir::new("/var");
+    let walk_dir = WalkDir::new("./").max_depth(1);
 
-    for entry in walk_dir {
+    for (i, entry) in walk_dir.into_iter().enumerate() {
+        if i == 0 {
+            if let Ok(entry) = entry {
+                file_tree.insert_root(entry);
+            }
+            continue
+        }
         if let Ok(entry) = entry {
             file_tree.insert(entry);
         }

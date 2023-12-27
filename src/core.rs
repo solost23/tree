@@ -23,9 +23,6 @@ impl Cli {
     // core login
     pub fn run(&self) {
         let mut current_dir = path::PathBuf::from(self.path.clone());
-        if current_dir == path::PathBuf::from(".") || current_dir == path::PathBuf::from("./") {
-            current_dir = env::current_dir().unwrap();
-        }
 
         let walk_dir = WalkDir::new(current_dir.clone()).
             // 查询深度
@@ -55,11 +52,14 @@ impl Cli {
 
         // 收集文件||文件夹
         let mut file_tree = Tree::new();
-        for entry in entries {
-            file_tree.insert(entry)
+        for (i, entry) in entries.iter().enumerate() {
+            // 第一个节点就是根节点
+            if i == 0 {
+                file_tree.insert_root(entry.clone());
+            }
+            file_tree.insert(entry.clone());
         }
 
         file_tree.printer();
-
     }
 }
