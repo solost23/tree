@@ -50,6 +50,7 @@ impl Tree {
 
     pub fn insert_root(&mut self, entry: DirEntry) -> &mut Self {
         self.root = Some(Arc::new(Mutex::new(Node::new(&entry, &String::new()))));
+        self.set_len(self.len + 1);
         self
     }
 
@@ -87,9 +88,7 @@ impl Tree {
             }
 
             if !flag {
-                let node = Some(Arc::new(
-                    Mutex::new(Node::new(&entry, &prefix.to_string())),
-                ));
+                let node = Some(Arc::new(Mutex::new(Node::new(&entry, &prefix.to_string())), ));
 
                 root.unwrap().lock().unwrap().
                     push(node.clone());
@@ -160,15 +159,31 @@ impl Tree {
     pub fn printer(&self) {
         let nodes = self.dfs();
 
-        // 打印根节点
+        // 打印根节点 & 收集文件和文件夹数量
+        let mut dir = 0;
+        let mut file = 0;
         if let Some(root) = &self.root {
             self._print_line(true, root);
+            if root.lock().unwrap().data.file_type().is_dir() {
+                dir += 1;
+            }
+            if root.lock().unwrap().data.file_type().is_file() {
+                file += 1;
+            }
         }
 
         // 打印子节点
         for node in nodes.iter() {
             self._print_line(false, node);
+            if node.lock().unwrap().data.file_type().is_dir() {
+                dir += 1;
+            }
+            if node.lock().unwrap().data.file_type().is_file() {
+                file += 1;
+            }
         }
+
+        println!("{} directory, {} file", dir, file);
     }
 
     // print line
@@ -215,5 +230,5 @@ fn tree_test() {
     }
 
     file_tree.printer();
-    println!("tree_len: {}", file_tree.len);
+    // println!("tree_len: {}", file_tree.len);
 }
