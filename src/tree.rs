@@ -1,4 +1,4 @@
-use std::fmt::{Debug, format};
+use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 use walkdir::{DirEntry, WalkDir};
 

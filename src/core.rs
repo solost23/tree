@@ -1,4 +1,4 @@
-use std::{env, path};
+use std::{path};
 use clap::Parser;
 use walkdir::{DirEntry, WalkDir};
 use crate::Tree;

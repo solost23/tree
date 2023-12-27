@@ -2,7 +2,7 @@
 
 tree is a line-oriented search tool that recursively searches the current directory.
 
-## example
+## simple example
 
 ```shell
 cargo run --example search -- -p src
